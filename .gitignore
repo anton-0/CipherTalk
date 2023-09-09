@@ -1,0 +1,5 @@
+__py*
+.idea/
+notes.md
+data/*
+test.py
