@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Dict
 from threading import Thread
 
+from libs.encryption_decryption import CipherMode, encrypt, decrypt
 
 class MessageType(Enum):
     MESSAGE = 1
@@ -22,43 +23,71 @@ status = {
     "quitRequest": False
 }
 
+
+params = {
+    "key": b'T\x04\xc3\x1c\xe6\xfc_\xc9\xbeg\x88L\xd4\x05\xf9S',
+    "mode": CipherMode.ECB
+}
+
+
 HEADER_LENGTH = 128
 BUFFER_SIZE = 4096
 
 
-def read_header(string: str):
+def read_header(string: str) -> Dict[str, int | str | MessageType | CipherMode]:
+    """
+    Function reads header, parsing some fields into Enums.
+
+    Returns a header which is a json dict.
+    :param string:
+    :return: dict[str, int | str | MessageType | CipherMode]
+    """
+
     header = json.loads(string)
     header['type'] = MessageType(header['type'])
+    header['mode'] = CipherMode(header['mode'])
     return header
 
 
-def format_header(header: Dict[str, int | str | MessageType]) -> str:
+def format_header(header: Dict[str, int | str | MessageType | CipherMode], info='') -> str:
+    """
+    Function formats header to serializable format.
+    Also adds padding to fixed size length.
+
+    Returns serialized json header.
+    :param header: dict[str, int | str | MessageType | CipherMode]
+    :param info: str
+    :return: str
+    """
+
+    header['mode'] = header['mode'].value
     header['type'] = header['type'].value
+    header['info'] = info
     l = len(json.dumps(header))
     if l > HEADER_LENGTH:
         raise Exception(f"Header too long, expected max {HEADER_LENGTH}, got {l}")
     elif l < HEADER_LENGTH:
-        # add padding
         header['padding'] = '0'*(HEADER_LENGTH-l-len(', "padding": ')-2)
 
     return json.dumps(header)
 
 
-def get_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("port")
-    parser.parse_args()
-    return parser.port
+def switch_encryption_mode() -> None:
+    """
+    Function switches between encryption modes.
+    :return: None
+    """
 
-
-def progress_bar(file, filesize: int, filename: str):
-    bar = tqdm.tqdm(range(filesize), f"Sending {filename}", unit="B", unit_scale=True, unit_divisor=1024)
-    while bar.n < filesize:
-        # time.sleep(0.1)  # don't know if it's needed, we'll see when we set up machines
-        bar.update(file.tell())
+    params['mode'] = CipherMode.ECB if params['mode'] == CipherMode.CBC else CipherMode.CBC
 
 
 def listen(s: socket.socket):
+    """
+    Thread function that reads data coming to provided network socket.
+    :param s: socket
+    :return: None
+    """
+
     while status['listening']:
         header = read_header(s.recv(HEADER_LENGTH).decode())
 
@@ -66,65 +95,127 @@ def listen(s: socket.socket):
             print("Other user just left, press ENTER to quit")
             status['quitRequest'] = True
             status['listening'] = False
+
         elif header['type'] == MessageType.LEAVING_TOO:
             status['listening'] = False
+
         elif header['type'] == MessageType.MESSAGE:
-            message = s.recv(header['content_length']).decode()
+            iv = None
+            if header['mode'] == CipherMode.CBC:
+                iv = s.recv(16)
+            message = decrypt('AES', header['mode'].value, params['key'], s.recv(header['content_length']), iv).decode()
             print(f"> {message}")
+
         elif header['type'] == MessageType.FILE_TRANSFER:
-            fpath = 'data/receiver/' + os.path.basename(header['filename'])
+            iv = None
+            if header['mode'] == CipherMode.CBC:
+                iv = s.recv(16)
+
             iterations = header['content_length'] // BUFFER_SIZE
             if header['content_length'] % BUFFER_SIZE:
                 iterations += 1
-            print(f"Receiving file {header['filename']} of size {header['content_length']}, needed iterations: {iterations}")
+
+            bar = tqdm.tqdm(range(header['content_length']), f"Receiving {header['filename']}", unit="B", unit_scale=True, unit_divisor=1024)
+            fpath = 'data/receiver/' + os.path.basename(header['filename'])
             with open(fpath, 'wb') as file:
                 for _ in range(iterations):
                     bytes_read = s.recv(BUFFER_SIZE)
-                    file.write(bytes_read)
+                    decrypted_bytes = decrypt('AES', header['mode'].value, params['key'], bytes_read, iv)
+                    file.write(decrypted_bytes)
+                    bar.update(len(bytes_read))
+                bar.disable = True
+
+            bar.update(len(bytes_read))
             print("File received!")
+
         else:
             print(f"Unknown message type: {header['type']}")
 
 
+def encrypt_and_send(s: socket, data: bytes, header: dict[str, int | CipherMode | MessageType]) -> None:
+    """
+    Function encrypts data, adds necessary fields to the header,
+    encrypts data and sends it with optional info about used cryptography.
+
+    :param s: socket
+    :param data: bytes
+    :param header: dict[str, int | CipherMode | MessageType]
+    :return: None
+    """
+
+    encrypted_data = encrypt('AES', params['mode'].value, params['key'], data)
+    header['content_length'] = len(encrypted_data['ciphertext'])
+    formatted_header = format_header(header)
+
+    s.send(formatted_header.encode())
+    if 'iv' in encrypted_data:
+        s.send(encrypted_data['iv'])
+    s.send(encrypted_data['ciphertext'])
+
+
 def wait_for_input(s: socket.socket):
+    """
+    Thread function that waits for user input and sends data through provided network socket.
+
+    :param s: socket
+    :return: None
+    """
+
     while status['waiting']:
         message = input()
 
         header = {
-            'content_length': len(message.encode())
+            'mode': params['mode']
         }
         if message == "/q":
             print("Leaving...")
             header['type'] = MessageType.LEAVING
+            s.send(format_header(header).encode())
             status['waiting'] = False
+
         elif status['quitRequest']:
-            print("Leaving...")
+            print("Quitting...")
             header['type'] = MessageType.LEAVING_TOO
             status['waiting'] = False
+            s.send(format_header(header).encode())
+
         elif message == "/f":
-            # print("Provide path to file you wanna send: ", end="")
-            # fpath = input()
             fpath = '/home/anton/studia/CipherTalk/data/sender/pytorch_model.bin'
             if os.path.isfile(fpath):
                 header['type'] = MessageType.FILE_TRANSFER
-                header['content_length'] = os.path.getsize(fpath)
                 header['filename'] = os.path.basename(fpath)
-                formatted_header = format_header(header)
-                s.send(formatted_header.encode())
-                print(f"Sending file {fpath} of size {header['content_length']}")
+#
                 with open(fpath, 'rb') as file:
-                    progress_bar_thread = Thread(target=progress_bar, args=(file, header['content_length'], header['filename']))
-                    progress_bar_thread.start()
-                    s.sendfile(file)
-                    progress_bar_thread.join()
+                    file_bytes = file.read()
+                encrypted_file = encrypt('AES', params['mode'].value, params['key'], file_bytes)
+                header['content_length'] = len(encrypted_file['ciphertext'])
+
+                s.send(format_header(header).encode())
+                if 'iv' in encrypted_file:
+                    s.send(encrypted_file['iv'])
+
+                iterations = header['content_length'] // BUFFER_SIZE
+                if header['content_length'] % BUFFER_SIZE:
+                    iterations += 1
+
+                bar = tqdm.tqdm(range(header['content_length'] + 1), f"Sending {header['filename']}",
+                                     unit="B", unit_scale=True, unit_divisor=1024)
+
+                for i in range(iterations):
+                    data = encrypted_file['ciphertext'][BUFFER_SIZE*i:BUFFER_SIZE*i+BUFFER_SIZE]
+                    s.send(data)
+                    bar.update(len(data))
+                bar.disable = True
+
                 print("File sent!")
                 continue
+
+        elif message == "/m":
+            switch_encryption_mode()
+
         else:
             header['type'] = MessageType.MESSAGE
-
-        formatted_header = format_header(header)
-        data = formatted_header + message
-        s.send(data.encode())
+            encrypt_and_send(s, message.encode(), header)
 
 
 def main():
@@ -157,4 +248,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()  # *get_arguments()
+    main()
