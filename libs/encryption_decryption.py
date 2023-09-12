@@ -1,41 +1,79 @@
 import os
 from enum import Enum
-from cryptography.hazmat.primitives import padding
+from typing import Tuple
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-
-class CipherMode(Enum):
-    ECB = "ECB"
-    CBC = "CBC"
+from libs.formatting import add_padding, remove_padding
 
 
-def add_padding(data: bytes, block_size: int):
+def encrypt_key(encrypting_key: serialization.base.PublicKeyTypes, key_to_encrypt: bytes) -> bytes:
     """
-    The function to add padding to data given as parameter.
-    The size of data is expended by null bytes, so it is divisible by the block_size.
-
-    :param data: bytes
-    :param block_size: int
+    Function encrypts key using another key.
+    :param encrypting_key: serialization.base.PublicKeyTypes
+    :param key_to_encrypt: bytes
     :return: bytes
     """
+    return encrypting_key.encrypt(
+        key_to_encrypt,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
 
-    padder = padding.PKCS7(block_size).padder()
-    padded_data = padder.update(data)
-    return padded_data + padder.finalize()
 
-
-def remove_padding(data: bytes, block_size: int):
+def decrypt_key(decrypting_key: serialization.base.PrivateKeyTypes, key_to_decrypt: bytes) -> bytes:
     """
-    The function to remove earlier added padding.
-    Removes null bytes added by padder.
-
-    :param data: bytes
-    :param block_size: int
+    Function decrypts key using another key.
+    :param decrypting_key: serialization.base.PrivateKeyTypes
+    :param key_to_decrypt: bytes
     :return: bytes
     """
+    return decrypting_key.decrypt(
+        key_to_decrypt,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
 
-    unpadder = padding.PKCS7(block_size).unpadder()
-    return unpadder.update(data) + unpadder.finalize()
+
+def decrypt_private_key(encrypted_private_key: bytes, local_key: bytes, iv: bytes) -> serialization.base.PrivateKeyTypes:
+    """
+    Function decrypts provided private key using local key, AES algorithm in CBC mode.
+    :param encrypted_private_key: bytes
+    :param local_key: bytes
+    :param iv: bytes
+    :return: serialization.base.PrivateKeyTypes
+    """
+    cipher = Cipher(algorithms.AES(local_key), modes.CBC(iv))
+    decryptor = cipher.decryptor()
+    private_key_bytes_padded = decryptor.update(encrypted_private_key) + decryptor.finalize()
+    private_key = remove_padding(private_key_bytes_padded, algorithms.AES.block_size)
+    return serialization.load_pem_private_key(private_key, None)
+
+
+def encrypt_private_key(local_key: bytes, private_key: bytes) -> Tuple[bytes, bytes]:
+    """
+    Function encrypts provided key using local key.
+    For encryption algorithm AES in CBC mode is used.
+
+    :param local_key: Key used for encryption.
+    :param private_key: Key that is being encrypted.
+    :return: Encrypted private key and initialization vector used in CBC mode.
+    """
+
+    iv = os.urandom(16)
+    cipher = Cipher(algorithms.AES(local_key), modes.CBC(iv))
+    encryptor = cipher.encryptor()
+    private_key_padded = add_padding(private_key, algorithms.AES.block_size)
+    encrypted_private_key = encryptor.update(private_key_padded) + encryptor.finalize()
+
+    return encrypted_private_key, iv
 
 
 def ecb_encrypt(data: bytes, key: bytes) -> dict[str, bytes]:
