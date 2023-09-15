@@ -1,5 +1,8 @@
 __py*
 .idea/
+data
+keys
+venv
+uis
 notes.md
-data/*
 test.py
