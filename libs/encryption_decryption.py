@@ -1,11 +1,10 @@
 import os
-from enum import Enum
 from typing import Tuple
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from libs.formatting import add_padding, remove_padding
+from formatting import add_padding, remove_padding
 
 
 def encrypt_key(encrypting_key: serialization.base.PublicKeyTypes, key_to_encrypt: bytes) -> bytes:

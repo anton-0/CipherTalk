@@ -1,10 +1,12 @@
 import os
 import pickle
+import argparse
 from typing import Tuple
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, hashes
 
-from libs.encryption_decryption import encrypt_private_key
+from encryption_decryption import encrypt_private_key
+
 
 def generate_session_key(key_size: int) -> bytes:
     return os.getrandom(key_size // 8)
@@ -87,7 +89,12 @@ def generate_and_save_all_keys(password: str) -> None:
     save_keys(encrypted_private_key, public_key, local_key, iv)
 
 
-if __name__ == '__main__':
-    # generate_and_save_all_keys('strongpass')
-    pass
+def get_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('password', type=str, help='Password to encode local key with.')
+    arguments = parser.parse_args()
+    return arguments.password
 
+
+if __name__ == '__main__':
+    generate_and_save_all_keys(get_arguments())

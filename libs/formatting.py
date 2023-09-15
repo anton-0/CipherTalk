@@ -12,11 +12,12 @@ class CipherMode(Enum):
 class MessageType(Enum):
     MESSAGE = 1
     LEAVING = 2
-    LEAVING_TOO = 3
-    FILE_TRANSFER = 4
-    SYN = 5
-    SYN_ACK = 6
-    ACK = 7
+    SYN = 4
+    SYN_ACK = 5
+    FILE_TRANSFER = 6
+    FILE_RECEIVED = 7
+    FILE_SENT = 8
+
 
 HEADER_LENGTH = 128
 
@@ -48,6 +49,7 @@ def remove_padding(data: bytes, block_size: int):
     unpadder = padding.PKCS7(block_size).unpadder()
     return unpadder.update(data) + unpadder.finalize()
 
+
 def read_header(string: str) -> Dict[str, int | str | MessageType | CipherMode]:
     """
     Function reads header, parsing some fields into Enums.
@@ -57,6 +59,8 @@ def read_header(string: str) -> Dict[str, int | str | MessageType | CipherMode]:
     :return: dict[str, int | str | MessageType | CipherMode]
     """
 
+    if not string:
+        return None
     header = json.loads(string)
     header['type'] = MessageType(header['type'])
     if 'mode' in header:
