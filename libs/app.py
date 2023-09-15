@@ -1,7 +1,7 @@
 import pickle
 
 from libs.workers import *
-from uis.dialogs import ConnectionDialog
+from libs.dialogs import ConnectionDialog
 
 class UiMainWindow(QMainWindow):
     def __init__(self, username: str, host_port: int, dest_address: str, dest_port: int):
