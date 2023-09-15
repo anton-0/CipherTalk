@@ -5,7 +5,7 @@ from typing import Tuple
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, hashes
 
-from encryption_decryption import encrypt_private_key
+from libs.encryption_decryption import encrypt_private_key
 
 
 def generate_session_key(key_size: int) -> bytes:
@@ -17,20 +17,20 @@ def save_keys(private_key: bytes, public_key: bytes, local_key: bytes, iv: bytes
     # save local key
     local_dir = '../keys/.local'
     if not os.path.exists(local_dir):
-        os.mkdir(local_dir)
+        os.makedirs(local_dir, exist_ok=True)
     with open(local_dir + '/local_key.p', 'wb') as f:
         pickle.dump({'key':local_key, 'iv':iv}, f)
 
     # save rsa key pair
     private_dir = '../keys/.private'
     if not os.path.exists(private_dir):
-        os.mkdir(private_dir)
+        os.makedirs(private_dir, exist_ok=True)
     with open(private_dir + "/rsa_private.pem", "wb") as f:
         f.write(private_key)
 
     public_dir = '../keys/.pub'
     if not os.path.exists(public_dir):
-        os.mkdir(public_dir)
+        os.makedirs(public_dir, exist_ok=True)
     with open(public_dir + "/rsa_public.pub", "wb") as f:
         f.write(public_key)
 
