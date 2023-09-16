@@ -5,7 +5,8 @@ import socket
 import traceback
 from cryptography.hazmat.primitives import serialization, hashes
 from typing import Tuple
-from libs.key_generation import generate_session_key
+
+from key_generation import generate_session_key
 from libs.encryption_decryption import encrypt, decrypt, decrypt_private_key, encrypt_key, decrypt_key
 from libs.formatting import read_header, format_header, HEADER_LENGTH, MessageType, CipherMode
 from libs.utils import calculate_needed_iterations
@@ -68,13 +69,14 @@ class Worker(QRunnable):
             self.signals.finished.emit()  # Done
 
 
-def switch_encryption_mode() -> None:
+def switch_encryption_mode() -> bool:
     """
     Function switches between encryption modes.
-    :return: None
+    :return: True on success.
     """
 
     params['mode'] = CipherMode.ECB if params['mode'] == CipherMode.CBC else CipherMode.CBC
+    return True
 
 
 def encrypt_and_send(s: socket, data: bytes, header: dict[str, int | CipherMode | MessageType]) -> None:
@@ -106,17 +108,14 @@ def handle_incoming_traffic(s: socket.socket, progress_callback: pyqtBoundSignal
     :return: None
     """
 
-    print("Listening...")
     while status['listening']:
         header = read_header(s.recv(HEADER_LENGTH).decode())
         if not header:
-            print("Header is None is handle_incoming_traffic(), exiting worker")
             return None
 
         elif header['type'] == MessageType.LEAVING:
-            print("Other user just left")
             status['listening'] = False
-            progress_callback.emit((MessageType.LEAVING, header['username']))
+            progress_callback.emit((MessageType.LEAVING, None, header['username']))
 
         elif header['type'] == MessageType.MESSAGE:
             iv = None
@@ -132,7 +131,7 @@ def handle_incoming_traffic(s: socket.socket, progress_callback: pyqtBoundSignal
 
             iterations = calculate_needed_iterations(header, BUFFER_SIZE)
 
-            fpath = 'data/receiver/' + os.path.basename(header['filename'])
+            fpath = '/home/' + os.getlogin() + '/Downloads/' + os.path.basename(header['filename'])
             with open(fpath, 'wb') as file:
                 for _ in range(iterations):
                     bytes_read = s.recv(BUFFER_SIZE)
@@ -157,8 +156,7 @@ def try_connect(host: str, port: int, my_username: str, progress_callback: pyqtB
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     if status['connected']:
-        print("Seems like you're already connected!")
-        return None, None
+        return MessageType.INFO, "Seems like you're already connected!"
     else:
         try:
             client.connect((host, port))
@@ -167,24 +165,21 @@ def try_connect(host: str, port: int, my_username: str, progress_callback: pyqtB
             header = {'type': MessageType.SYN, 'username': my_username}
             client.send(format_header(header).encode())
             client.send(params['public_key'])
-            print("SYN sent")
+            progress_callback.emit((MessageType.INFO, "Connection attempt..."))
 
             # wait for SYN_ACK
             header = read_header(client.recv(HEADER_LENGTH).decode())
             if header['type'] == MessageType.SYN_ACK:
-                print("SYN_ACK received")
-
                 # read and decrypt session key
                 encrypted_session_key = client.recv(BUFFER_SIZE)
                 params['session_key'] = decrypt_key(params['private_key'], encrypted_session_key)
-                print("Decrypted and saved session key")
+                progress_callback.emit((MessageType.INFO, "Success!"))
                 status['connected'] = True
 
                 return client, header['username']
 
         except ConnectionRefusedError:
-            print('User is currently offline, try again later')
-            return None, None
+            return MessageType.INFO, 'User is currently offline, try again later'
 
 
 def send_file(s: socket.socket, fpath: str, fsize: int, progress_callback: pyqtBoundSignal) -> None:
@@ -198,6 +193,7 @@ def send_file(s: socket.socket, fpath: str, fsize: int, progress_callback: pyqtB
     :param progress_callback: Object through the progress of sending will be sent to the main thread.
     :return: None
     """
+
     header = {
         'mode': params['mode'],
         'type': MessageType.FILE_TRANSFER,
@@ -240,11 +236,9 @@ def listen(s: socket.socket, progress_callback: pyqtBoundSignal) -> Tuple:
         if not status['connected']:
             header = read_header(client.recv(HEADER_LENGTH).decode())
             if header['type'] == MessageType.SYN:
-                print(f"DEBUG:: listen(): {header['username']}")
                 return client, header['username']
     except OSError:
         # Main thread quits.
-        print("Stopping listening worker")
         return None, None
 
 

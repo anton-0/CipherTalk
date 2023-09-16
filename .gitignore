@@ -1,9 +1,7 @@
 __py*
 .idea/
+venv
+env
 data
 keys
-venv
 uis
-notes.md
-test.py
-env

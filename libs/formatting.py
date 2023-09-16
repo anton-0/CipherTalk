@@ -17,6 +17,7 @@ class MessageType(Enum):
     FILE_TRANSFER = 6
     FILE_RECEIVED = 7
     FILE_SENT = 8
+    INFO = 9
 
 
 HEADER_LENGTH = 128
@@ -54,9 +55,9 @@ def read_header(string: str) -> Dict[str, int | str | MessageType | CipherMode]:
     """
     Function reads header, parsing some fields into Enums.
 
-    Returns a header which is a json dict.
+    Returns a header which is a json dict or None in special cases.
     :param string:
-    :return: dict[str, int | str | MessageType | CipherMode]
+    :return: dict[str, int | str | MessageType | CipherMode] | None
     """
 
     if not string:
